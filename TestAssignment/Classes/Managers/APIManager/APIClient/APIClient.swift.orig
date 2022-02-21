@@ -1,0 +1,201 @@
+//
+//  APIClient.swift
+//
+
+import Foundation
+import Alamofire
+
+class CustomServerTrustPolicyManager: ServerTrustManager {
+
+    open override func serverTrustEvaluator(forHost host: String) throws -> ServerTrustEvaluating? {
+
+        guard let evaluator = evaluators[host] else {
+            if allHostsMustBeEvaluated {
+                throw AFError.serverTrustEvaluationFailed(reason: .noRequiredEvaluator(host: host))
+            }
+            return nil
+        }
+        // Implement your custom domain matching behavior...
+        return evaluator
+    }
+}
+
+public final class PublicPinKeyTrustEvaluator: ServerTrustEvaluating {
+
+    private static let rsa2048Asn1Header: [UInt8] = [
+        0x30, 0x82, 0x01, 0x22, 0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86,
+        0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00, 0x03, 0x82, 0x01, 0x0f, 0x00
+    ]
+
+    public func evaluate(_ trust: SecTrust, forHost host: String) throws {
+
+        guard let pubKey = SecTrustCopyPublicKey(trust) else {
+            //completionHandler(.cancelAuthenticationChallenge, nil)
+            try trust.af.performDefaultValidation(forHost: host)
+            return
+        }
+        let publicKeyList = ["lf8aNmGSdoxUFS9k/Wof6+DokpgJzGSGmcO66iRkf4o=",
+                             "nlruS0aobr+yR97ghalcOo8MEwYbRxTLojed1jE0izc=",
+                             "34qM3ts0cXZxwNh00iSez/vWapEDhXb77hvPtIOLzZg=",
+                             "+OB/fLqATLaL7n64N76ZQWcZ5AxxQDiP038kxnxP+lk=",
+                             "r/mIkG3eEpVdm+u/ko/cwxzOMo1bk4TyHIlByibiA5E="]
+
+        var error: Unmanaged<CFError>?
+        if let pubKeyData = SecKeyCopyExternalRepresentation(pubKey, &error) {
+            var keyWithHeader = Data(_ : PublicPinKeyTrustEvaluator.rsa2048Asn1Header)//Data(bytes: PublicPinKeyTrustEvaluator.rsa2048Asn1Header)
+            keyWithHeader.append(pubKeyData as Data)
+            let sha256Key = Utilities.sha256(keyWithHeader)
+            if publicKeyList.contains(sha256Key) {
+                // Server Trusted
+                try trust.af.performValidation(forHost: host)
+            } else {
+                throw AFError.serverTrustEvaluationFailed(reason: .noPublicKeysFound)
+            }
+        }
+    }
+}
+
+class APIClient {
+
+    private static var sessionManager: Alamofire.Session = {
+
+        let evaluators: [String: ServerTrustEvaluating] = [
+            // By default, certificates included in the app bundle are pinned automatically.
+            "iss.adanielectricity.com": PublicPinKeyTrustEvaluator()
+            // By default, public keys from certificates included in the app bundle are used automatically.
+        ]
+        let manager = ServerTrustManager(evaluators: evaluators)
+        let customManager = CustomServerTrustPolicyManager(evaluators: evaluators)
+        let session = Session(serverTrustManager: customManager)
+        return session
+    }()
+
+    // MARK: performRequest
+    @discardableResult
+    public static func performRequest(route: APIRouter, completion: @escaping (AFDataResponse<Any>) -> Void) -> DataRequest {
+        return AF.request(route).responseJSON(completionHandler: { (response) in
+            completion(response)
+        })
+    }
+
+    @discardableResult
+    public static func performRequest(route: URLRequest, decoder: JSONDecoder = JSONDecoder(), completion: @escaping (AFDataResponse<Any>) -> Void) -> DataRequest {
+
+        return AF.request(route).validate().responseJSON(completionHandler: { (response) in
+            completion(response)
+        })
+    }
+    public static func performRequest<T: Decodable>(route: APIRouter, decoder: JSONDecoder = JSONDecoder(), isList: Bool = false, serverTrust: Bool = false, completion: @escaping (_ data: T?, _ success: Bool, _ errMsg: String) -> Void) {
+        let session: Alamofire.Session = (serverTrust) ? sessionManager : AF
+//        session.request(route).response(completionHandler: { (response) in
+        session.request(route).validate().response(completionHandler: { (response) in
+            switch response.result {
+            case .success(let value):
+                //Everything is fine, return the value in onNext
+                //debugPrint("Success")
+                guard let data = value else { return }
+
+                    let convertedString = String(data: data, encoding: String.Encoding.utf8) as NSString? ?? ""
+                    debugPrint(convertedString)
+
+                    do {
+                        let decoder = JSONDecoder()
+
+                        let responseBaseModel = try? decoder.decode(BaseResponse.self, from: data)
+
+                        let responseModel = try decoder.decode(T.self, from: data)
+
+                        completion(responseModel, responseBaseModel?.resStatus ?? true, responseBaseModel?.msg ?? "" )
+                    } catch {
+                        completion(nil, false, "Something went wrong. Please try again.")
+                    }
+                return
+
+            case .failure:
+                debugPrint(response.debugDescription)
+                completion(nil, false, "Something went wrong. Please try again.")
+
+                //Something went wrong, switch on the status code and return the error
+                return
+            }
+        })
+    }
+}
+
+extension APIClient {
+    static func loginAccount(email: String, password: String, completion: @escaping (_ points: LoginResponse?, _ errMsg: String) -> Void) {
+
+        performRequest(route: APIRouter.login(email: email, password: password)) { (response: LoginResponse?, success: Bool, errMsg: String) in
+            if let response = response {
+                if success {
+                    completion(response, errMsg)
+                } else {
+                    completion(nil, errMsg)
+                }
+            } else {
+                completion(nil, errMsg)
+            }
+        }
+    }
+    static func getCategories(completion: @escaping (_ categories: [Categories]?, _ errMsg: String) -> Void) {
+
+        performRequest(route: APIRouter.getCategories) { (response: CategoriesResponse?, success: Bool, errMsg: String) in
+            if let response = response {
+                if success {
+                    completion(response.arrCategories, errMsg)
+                } else {
+                    completion(nil, errMsg)
+                }
+            } else {
+                completion(nil, errMsg)
+            }
+        }
+    }
+<<<<<<< HEAD
+    
+    static func getDashboard(completion: @escaping (_ sectionList: [SectionList]?, _ errMsg: String) -> Void) {
+
+        performRequest(route: APIRouter.getDashboard(userid: 432)) { (response: DashboardResponse?, success: Bool, errMsg: String) in
+            if let response = response {
+                if success {
+                    completion(response.sectionListArry, errMsg)
+                } else {
+                    completion(nil, errMsg)
+                }
+            } else {
+                completion(nil, errMsg)
+            }
+        }
+    }
+    
+=======
+    static func getCoursesBycategory(strCatId: String,  completion: @escaping (_ categories: [Categories]?, _ errMsg: String) -> Void) {
+>>>>>>> master
+
+        performRequest(route: APIRouter.getCoursesByCategory(catId: strCatId)) { (response: CategoriesResponse?, success: Bool, errMsg: String) in
+            if let response = response {
+                if success {
+                    completion(response.arrCategories, errMsg)
+                } else {
+                    completion(nil, errMsg)
+                }
+            } else {
+                completion(nil, errMsg)
+            }
+        }
+    }
+    static func getCourseDetails(strCourseId: String, completion: @escaping (_ categories: [Categories]?, _ errMsg: String) -> Void) {
+
+        performRequest(route: APIRouter.getCourseDetails(courseId: strCourseId)) { (response: CategoriesResponse?, success: Bool, errMsg: String) in
+            if let response = response {
+                if success {
+                    completion(response.arrCategories, errMsg)
+                } else {
+                    completion(nil, errMsg)
+                }
+            } else {
+                completion(nil, errMsg)
+            }
+        }
+    }
+}

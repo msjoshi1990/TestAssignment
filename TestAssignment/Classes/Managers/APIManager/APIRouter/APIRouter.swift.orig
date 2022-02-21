@@ -1,0 +1,112 @@
+//
+//  APIRouter.swift
+//
+
+import Foundation
+import Alamofire
+
+enum APIRouter: URLRequestConvertible {
+
+    case login(email: String, password: String)
+    case register(email: String, password: String, firstname: String, lastname: String, mobile: String)
+    case getProfile(userid: Int)
+    case getCategories
+<<<<<<< HEAD
+    case getDashboard(userid: Int)
+=======
+    case getCoursesByCategory(catId: String)
+    case getCourseDetails(courseId: String)
+>>>>>>> master
+
+    // MARK: - HTTPMethod
+    private var method: HTTPMethod {
+        switch self {
+<<<<<<< HEAD
+        case .login, .getProfile(userid: ), .getCategories, .getDashboard(userid: ):
+=======
+        case .login, .getProfile(userid: ), .getCategories, .getCoursesByCategory(catId: ), .getCourseDetails(courseId: ):
+>>>>>>> master
+            return .get
+        case .register:
+            return .post
+        }
+    }
+
+    // MARK: - Path
+    private var path: String {
+        switch self {
+        case .login:
+            return "/login"
+        case .register:
+            return "/register"
+        case .getProfile(let userid):
+            return "/profile/\(userid)"
+        case .getCategories:
+<<<<<<< HEAD
+            return "/data"
+         case .getDashboard(let userid):
+         return "/categorynode/data/\(userid)"
+=======
+            return "/taxonomy/data"
+        case .getCoursesByCategory(let catId):
+            return "/niit_course_details/\(catId)"
+        case .getCourseDetails(let courseId):
+            return "/categorynode/data/\(courseId)"
+>>>>>>> master
+        }
+    }
+
+    // MARK: - Parameters
+    private var parameters: Parameters? {
+        switch self {
+        case .login(let email, let password):
+            return [Constants.APIParameterKey.email: email, Constants.APIParameterKey.password: password]
+        case .register(let email, let password, let firstname, let lastname, let mobile):
+            return [Constants.APIParameterKey.email: email, Constants.APIParameterKey.password: password, Constants.APIParameterKey.firstName: firstname, Constants.APIParameterKey.firstName: lastname, Constants.APIParameterKey.mobileNo: mobile]
+        case .getProfile(userid: ):
+            return nil
+        case .getCategories:
+            return nil
+<<<<<<< HEAD
+            
+        case .getDashboard(userid: ):
+=======
+        case .getCoursesByCategory(catId: ):
+            return nil
+        case .getCourseDetails(courseId: ):
+>>>>>>> master
+            return nil
+        }
+    }
+
+    // MARK: - URLRequestConvertible
+    func asURLRequest() throws -> URLRequest {
+        let url = try Constants.BaseUrl.asURL()
+
+        var urlRequest = URLRequest(url: url.appendingPathComponent(path))
+
+        // HTTP Method
+        urlRequest.httpMethod = method.rawValue
+
+        // Common Headers
+        urlRequest.setValue(ContentType.haljson.rawValue, forHTTPHeaderField: HTTPHeaderField.acceptType.rawValue)
+        urlRequest.setValue(ContentType.json.rawValue, forHTTPHeaderField: HTTPHeaderField.contentType.rawValue)
+//        urlRequest.setValue(Constants.NiitUsername, forHTTPHeaderField: HTTPHeaderField.niitUsername.rawValue)
+//        urlRequest.setValue(Constants.NiitPassword, forHTTPHeaderField: HTTPHeaderField.niitPassword.rawValue)
+//        urlRequest.setValue(HTTPHeaderField.basicAuth.rawValue, forHTTPHeaderField: HTTPHeaderField.authentication.rawValue)
+        let credential = Data("\(Constants.NiitUsername):\(Constants.NiitPassword)".utf8).base64EncodedString()
+
+        urlRequest.setValue("Basic \(credential)", forHTTPHeaderField: HTTPHeaderField.authentication.rawValue)
+        
+        // Parameters
+        if let parameters = parameters {
+            do {
+                urlRequest.httpBody = try JSONSerialization.data(withJSONObject: parameters, options: [])
+            } catch {
+                throw AFError.parameterEncodingFailed(reason: .jsonEncodingFailed(error: error))
+            }
+        }
+
+        return urlRequest
+    }
+}
